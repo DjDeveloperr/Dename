@@ -8,21 +8,25 @@ export type SavedRecord = {
 };
 
 export type DNSServerEvents = {
-  listen: [];
+  listen: [number];
+  listenTcp: [number];
   clientError: [Error];
   error: [Error];
   close: [];
+  closeTcp: [];
   query: [DNSQuery];
   uncaughtException: [Error];
 };
 
 export interface ListenOptions {
   port: number;
+  tcpPort?: number;
   address?: string;
 }
 
 export class DNSServer extends EventEmitter<DNSServerEvents> {
-  socket?: Deno.DatagramConn;
+  udpSocket?: Deno.DatagramConn;
+  tcpSocket?: Deno.Listener;
   records: { [name: string]: RecordWithTTL[] } = {};
 
   constructor(records: SavedRecord = {}) {
@@ -60,50 +64,116 @@ export class DNSServer extends EventEmitter<DNSServerEvents> {
   }
 
   close() {
-    this.socket?.close();
+    this.udpSocket?.close();
+  }
+
+  closeTcp() {
+    this.tcpSocket?.close();
   }
 
   async listen(options: ListenOptions) {
-    this.socket = Deno.listenDatagram({
-      port: options.port,
-      transport: "udp",
-      hostname: options.address ?? "0.0.0.0",
-    });
+    await Promise.all([
+      (async () => {
+        if (this.udpSocket !== undefined) throw new Error("Already listening");
+        this.udpSocket = Deno.listenDatagram({
+          port: options.port,
+          transport: "udp",
+          hostname: options.address ?? "0.0.0.0",
+        });
 
-    this.emit("listen");
-    try {
-      for await (const [_buf, addr] of this.socket) {
-        const buffer = new Buffer(_buf);
-        let query: DNSQuery;
-
+        this.emit("listen", options.port);
         try {
-          query = DNSQuery.create(DNSQuery.parseRaw(buffer, addr));
+          for await (const [_buf, addr] of this.udpSocket) {
+            await this._handleMessage({
+              buf: new Buffer(_buf),
+              addr,
+              send: async (dns) => await this.sendUDP(dns),
+            });
+          }
         } catch (e) {
-          this.emit("clientError", new Error(`Invalid DNS Datagram`));
-          continue;
+          this.emit("error", e);
         }
 
-        if (query === undefined || query === null) {
-          continue;
+        this.emit("close");
+      })(),
+      (async () => {
+        if (options.tcpPort !== undefined) {
+          if (this.tcpSocket !== undefined)
+            throw new Error("Already listening over TCP");
+          this.tcpSocket = Deno.listen({
+            port: options.tcpPort,
+            hostname: options.address,
+          });
+          this.emit("listenTcp", options.tcpPort);
+
+          try {
+            for await (const conn of this.tcpSocket) {
+              const buf = new Buffer(await Deno.readAll(conn));
+              await this._handleMessage({
+                buf,
+                addr: conn.remoteAddr,
+                send: async (dns) => await this.sendTCP(conn, dns),
+              });
+            }
+          } catch (e) {
+            this.emit("error", e);
+          }
+
+          this.emit("closeTcp");
         }
-
-        const self = this;
-        query._respond = async function () {
-          await self.send(query);
-        };
-
-        this.emit("query", query);
-      }
-    } catch (e) {
-      this.emit("error", e);
-    }
-
-    this.emit("close");
+      })(),
+    ]);
   }
 
-  async send(res: DNSQuery) {
-    if (!this.socket) throw new Error("Not listening");
+  private async _handleMessage(d: {
+    buf: Uint8Array;
+    addr: Deno.Addr;
+    send: (p: DNSQuery) => unknown;
+  }) {
+    const buffer = new Buffer(d.buf);
+    let query: DNSQuery;
 
+    try {
+      query = DNSQuery.create(DNSQuery.parseRaw(buffer, d.addr));
+    } catch (e) {
+      this.emit("clientError", new Error(`Invalid DNS Datagram`));
+      return;
+    }
+
+    if (query === undefined || query === null) {
+      return;
+    }
+
+    query._respond = async function () {
+      await d.send(query);
+    };
+
+    this.emit("query", query);
+  }
+
+  async sendUDP(res: DNSQuery) {
+    if (!this.udpSocket) throw new Error("Not listening");
+
+    const buf = this._preparePacket(res);
+    if (!buf) return;
+
+    await this.udpSocket.send(buf, res._client!);
+    return this;
+  }
+
+  async sendTCP(conn: Deno.Conn, res: DNSQuery) {
+    if (!this.tcpSocket) throw new Error("Not listening");
+
+    console.log("TCP Send");
+    const buf = this._preparePacket(res);
+    if (!buf) return console.log("Sad");
+
+    const bts = await conn.write(buf);
+    console.log("Written TCP:", bts);
+    return this;
+  }
+
+  private _preparePacket(res: DNSQuery) {
     try {
       res._flags.qr = 1;
       res.encode();
@@ -112,11 +182,7 @@ export class DNSServer extends EventEmitter<DNSServerEvents> {
       return;
     }
 
-    const addr = res._client!;
     const buf = res._raw!;
-    const port = res._client!.port;
-
-    await this.socket.send(buf, res._client!);
-    return this;
+    return buf;
   }
 }
