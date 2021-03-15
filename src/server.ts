@@ -112,9 +112,7 @@ export class DNSServer extends EventEmitter<DNSServerEvents> {
       return;
     }
 
-    const addr = res._client!;
     const buf = res._raw!;
-    const port = res._client!.port;
 
     await this.socket.send(buf, res._client!);
     return this;
