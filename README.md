@@ -8,7 +8,7 @@ DNS Server framework for Deno. Port of [node-named](https://github.com/trevoro/n
 import { DNSServer, CNAMERecord } from "https://deno.land/x/dename/mod.ts";
 
 const server = new DNSServer({
-  subdomain: new CNAMERecord("https://points-to.this"),
+  "domain": new CNAMERecord("points-to.this"),
 });
 
 server.on("listen", () => {

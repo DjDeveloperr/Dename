@@ -13,7 +13,7 @@ import { assertEquals } from "https://deno.land/std@0.90.0/testing/asserts.ts";
 
 const server = new DNSServer({
   txt: new TXTRecord("txt"),
-  cname: new CNAMERecord("https://google.com"),
+  cname: new CNAMERecord("google.com"),
   a: new ARecord("127.0.0.1"),
   aaaa: new AAAARecord("2001:6db8:10b8:20b8:30b8:40b8:3257:9652"),
   mx: new MXRecord({
@@ -85,7 +85,7 @@ Deno.test({
   async fn() {
     const res = await Deno.resolveDns("cname", "CNAME", options);
     assertEquals(res.length, 1);
-    assertEquals(res[0], "https\\:\\/\\/google.com.");
+    assertEquals(res[0], "google.com.");
   },
 });
 
