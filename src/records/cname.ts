@@ -6,9 +6,7 @@ export class CNAMERecord implements IRecord {
   target: string;
 
   constructor(fqdn: string) {
-    if (typeof fqdn !== "string")
-      throw new Error("Expected qualified URL for CNAME Record");
-    if(!validateNsName(fqdn))
+    if(typeof fqdn !== "string" || !validateNsName(fqdn))
       throw new Error("Expected valid FQDN for CNAME Record");
     this.target = fqdn;
   }
