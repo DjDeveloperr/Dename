@@ -53,5 +53,6 @@ export class SOARecord implements IRecord {
     this.retry = retry;
     this.expire = expire;
     this.ttl = ttl;
+    this.target = undefined;
   }
 }
