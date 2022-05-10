@@ -36,5 +36,7 @@ export class MXRecord implements IRecord {
         throw new Error("Invalid TTL value, expected Uint32BE");
       this.ttl = options.ttl;
     }
+
+    this.target = undefined;
   }
 }
